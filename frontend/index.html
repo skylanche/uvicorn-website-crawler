@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Uvicorn Website Crawler</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="styles.css">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="logo">🕷</div>
+    <div>
+      <h1>Uvicorn Website Crawler</h1>
+      <p>async website crawler // local edition</p>
+    </div>
+  </header>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('crawl')">New Crawl</div>
+    <div class="tab" onclick="switchTab('jobs')">Past Jobs</div>
+  </div>
+
+  <!-- ── NEW CRAWL TAB ── -->
+  <div id="tab-crawl">
+
+    <!-- Config card -->
+    <div class="card">
+      <div class="card-title">Crawl Configuration</div>
+      <div class="form-grid">
+        <div class="form-group full">
+          <label>Target URL or Subfolder</label>
+          <input id="url" type="text" placeholder="https://example.com  or  https://example.com/blog" />
+        </div>
+        <div class="form-group">
+          <label>Max Pages</label>
+          <input id="maxPages" type="number" value="500" min="1" max="500000" />
+        </div>
+        <div class="form-group">
+          <label>Concurrency</label>
+          <select id="concurrency">
+            <option value="5">5 — Gentle</option>
+            <option value="10">10 — Moderate</option>
+            <option value="20" selected>20 — Fast</option>
+            <option value="40">40 — Aggressive</option>
+            <option value="60">60 — Max speed</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Delay (seconds)</label>
+          <select id="delay">
+            <option value="0" selected>0s — Own site</option>
+            <option value="0.1">0.1s — Very fast</option>
+            <option value="0.5">0.5s — Polite</option>
+            <option value="1">1s — Safe</option>
+            <option value="2">2s — Stealth</option>
+          </select>
+        </div>
+      </div>
+      <button class="btn-start" id="startBtn" onclick="startCrawl()">
+        <span>🚀</span> Start Crawl
+      </button>
+    </div>
+
+    <!-- Progress card -->
+    <div class="card" id="progress-section">
+      <div class="card-title" style="justify-content: space-between">
+        <span>Crawl Progress</span>
+        <span id="status-badge" class="badge queued">Queued</span>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat-box">
+          <div class="stat-val" id="stat-pages">0</div>
+          <div class="stat-label">Pages Crawled</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="stat-links">0</div>
+          <div class="stat-label">Links Found</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="stat-speed">—</div>
+          <div class="stat-label">Pages / sec</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="stat-eta">—</div>
+          <div class="stat-label">ETA</div>
+        </div>
+      </div>
+
+      <div class="progress-bar-wrap">
+        <div class="progress-bar" id="progress-bar"></div>
+      </div>
+      <div class="current-url" id="current-url">Waiting to start...</div>
+    </div>
+
+    <!-- Download card -->
+    <div class="card" id="download-section" style="display:none">
+      <div class="card-title">Export Results</div>
+      <div class="download-row">
+        <button class="btn-download btn-xlsx" id="dl-xlsx">
+          📊 Download Excel (.xlsx)
+        </button>
+        <button class="btn-download btn-csv" id="dl-csv">
+          📄 Download CSV
+        </button>
+      </div>
+    </div>
+
+    <!-- Preview card -->
+    <div class="card" id="preview-section">
+      <div class="card-title">Live Preview</div>
+      <div class="filter-row">
+        <select id="filter-type" onchange="loadPreview()">
+          <option value="all">All Links</option>
+          <option value="internal">Internal Only</option>
+          <option value="external">External Only</option>
+        </select>
+        <select id="filter-status" onchange="loadPreview()">
+          <option value="all">All Statuses</option>
+          <option value="ok">2xx OK</option>
+          <option value="redirect">3xx Redirects</option>
+          <option value="broken">4xx / 5xx Broken</option>
+        </select>
+        <button class="btn-sm" onclick="loadPreview()">↻ Refresh</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>From Page</th>
+              <th>Link URL</th>
+              <th>Link Text</th>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Final URL</th>
+            </tr>
+          </thead>
+          <tbody id="preview-body">
+            <tr><td colspan="6" class="empty">No data yet</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /tab-crawl -->
+
+  <!-- ── PAST JOBS TAB ── -->
+  <div id="tab-jobs" style="display:none">
+    <div class="card">
+      <div class="card-title" style="justify-content: space-between">
+        <span>Past Crawl Jobs</span>
+        <button class="btn-sm" onclick="loadJobs()">↻ Refresh</button>
+      </div>
+      <div id="jobs-list">
+        <div class="empty">No jobs yet. Start a crawl first.</div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<script>
+const API = "http://localhost:8000";
+let currentJobId = null;
+let pollInterval = null;
+let startTime = null;
+let prevPages = 0;
+let speedSamples = [];
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    const names = ['crawl','jobs'];
+    t.classList.toggle('active', names[i] === name);
+  });
+  document.getElementById('tab-crawl').style.display = name === 'crawl' ? '' : 'none';
+  document.getElementById('tab-jobs').style.display  = name === 'jobs'  ? '' : 'none';
+  if (name === 'jobs') loadJobs();
+}
+
+// ── Start crawl ───────────────────────────────────────────────────────────────
+async function startCrawl() {
+  const url = document.getElementById('url').value.trim();
+  if (!url) return alert('Please enter a URL');
+
+  const req = {
+    url,
+    max_pages:   parseInt(document.getElementById('maxPages').value),
+    concurrency: parseInt(document.getElementById('concurrency').value),
+    delay:       parseFloat(document.getElementById('delay').value),
+  };
+
+  document.getElementById('startBtn').disabled = true;
+  document.getElementById('progress-section').style.display = '';
+  document.getElementById('download-section').style.display = 'none';
+  document.getElementById('preview-section').style.display = '';
+  setBadge('queued');
+
+  try {
+    const res = await fetch(`${API}/crawl`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req)
+    });
+    const data = await res.json();
+    currentJobId = data.job_id;
+    startTime = Date.now();
+    prevPages = 0;
+    speedSamples = [];
+    pollInterval = setInterval(poll, 1500);
+  } catch (e) {
+    alert('Could not connect to backend. Is the server running?\n\nRun: uvicorn api:app --reload --port 8000');
+    document.getElementById('startBtn').disabled = false;
+  }
+}
+
+// ── Poll status ───────────────────────────────────────────────────────────────
+async function poll() {
+  if (!currentJobId) return;
+  try {
+    const res = await fetch(`${API}/status/${currentJobId}`);
+    const job = await res.json();
+
+    const pages = job.pages_crawled || 0;
+    const links = job.links_found || 0;
+    const maxP  = parseInt(document.getElementById('maxPages').value);
+
+    document.getElementById('stat-pages').textContent = pages.toLocaleString();
+    document.getElementById('stat-links').textContent = links.toLocaleString();
+
+    // Speed
+    const elapsed = (Date.now() - startTime) / 1000;
+    const speed = elapsed > 0 ? (pages / elapsed).toFixed(1) : '—';
+    document.getElementById('stat-speed').textContent = speed;
+
+    // ETA
+    if (parseFloat(speed) > 0 && pages < maxP) {
+      const remaining = maxP - pages;
+      const eta = Math.round(remaining / parseFloat(speed));
+      document.getElementById('stat-eta').textContent = formatTime(eta);
+    } else {
+      document.getElementById('stat-eta').textContent = job.status === 'done' ? '✓ Done' : '—';
+    }
+
+    // Progress bar
+    const pct = Math.min((pages / maxP) * 100, 100);
+    document.getElementById('progress-bar').style.width = pct + '%';
+
+    // Current URL
+    if (job.current_url) {
+      document.getElementById('current-url').innerHTML =
+        `<span>→</span> ${escHtml(job.current_url)}`;
+    }
+
+    setBadge(job.status);
+
+    if (job.status === 'done' || job.status === 'error') {
+      clearInterval(pollInterval);
+      document.getElementById('startBtn').disabled = false;
+      document.getElementById('progress-bar').style.width = '100%';
+      document.getElementById('stat-eta').textContent = '✓ Done';
+      showDownloads();
+      loadPreview();
+    } else {
+      // Live preview refresh every 5 polls
+      if (Math.round(elapsed) % 8 === 0) loadPreview();
+    }
+  } catch (e) { /* ignore */ }
+}
+
+// ── Badge ─────────────────────────────────────────────────────────────────────
+function setBadge(status) {
+  const el = document.getElementById('status-badge');
+  el.className = `badge ${status}`;
+  el.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+// ── Downloads ─────────────────────────────────────────────────────────────────
+function showDownloads() {
+  document.getElementById('download-section').style.display = '';
+  document.getElementById('dl-xlsx').onclick = () =>
+    window.open(`${API}/download/${currentJobId}/xlsx`, '_blank');
+  document.getElementById('dl-csv').onclick = () =>
+    window.open(`${API}/download/${currentJobId}/csv`, '_blank');
+}
+
+// ── Preview table ─────────────────────────────────────────────────────────────
+async function loadPreview() {
+  if (!currentJobId) return;
+  const type   = document.getElementById('filter-type').value;
+  const status = document.getElementById('filter-status').value;
+  try {
+    const res = await fetch(
+      `${API}/preview/${currentJobId}?limit=200&link_type=${type}&status_filter=${status}`
+    );
+    const data = await res.json();
+    renderTable(data.rows || []);
+  } catch (e) { /* ignore */ }
+}
+
+function renderTable(rows) {
+  const tbody = document.getElementById('preview-body');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">No results yet...</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const [from, url, text, type, status, final] = r;
+    const typeTag = `<span class="tag tag-${type}">${type}</span>`;
+    const sc = statusClass(status);
+    return `<tr>
+      <td title="${escHtml(from)}"><a href="${escHtml(from)}" target="_blank">${truncate(from,40)}</a></td>
+      <td title="${escHtml(url)}"><a href="${escHtml(url)}" target="_blank">${truncate(url,45)}</a></td>
+      <td title="${escHtml(text)}">${truncate(text,30)}</td>
+      <td>${typeTag}</td>
+      <td class="${sc}">${escHtml(status)}</td>
+      <td title="${escHtml(final)}">${truncate(final,30)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function statusClass(s) {
+  const c = parseInt(s);
+  if (c >= 200 && c < 300) return 'status-ok';
+  if (c >= 300 && c < 400) return 'status-redirect';
+  if (c >= 400)            return 'status-error';
+  return 'status-other';
+}
+
+// ── Jobs list ─────────────────────────────────────────────────────────────────
+async function loadJobs() {
+  try {
+    const res = await fetch(`${API}/jobs`);
+    const jobs = await res.json();
+    const el = document.getElementById('jobs-list');
+    if (!jobs.length) {
+      el.innerHTML = '<div class="empty">No jobs yet.</div>';
+      return;
+    }
+    el.innerHTML = jobs.map(j => `
+      <div class="job-row">
+        <div class="job-url" title="${escHtml(j.start_url)}">${escHtml(j.start_url)}</div>
+        <div class="job-meta">${j.pages_crawled} pages · ${j.links_found} links</div>
+        <span class="badge ${j.status}">${j.status}</span>
+        <button class="btn-load" onclick="loadJob('${j.job_id}')">Load</button>
+        <button class="btn-del"  onclick="deleteJob('${j.job_id}', this)">✕</button>
+      </div>
+    `).join('');
+  } catch (e) {
+    document.getElementById('jobs-list').innerHTML =
+      '<div class="empty">Cannot connect to server.</div>';
+  }
+}
+
+function loadJob(jobId) {
+  currentJobId = jobId;
+  switchTab('crawl');
+  document.getElementById('progress-section').style.display = '';
+  document.getElementById('preview-section').style.display = '';
+  showDownloads();
+  loadPreview();
+  fetch(`${API}/status/${jobId}`).then(r => r.json()).then(job => {
+    setBadge(job.status);
+    document.getElementById('stat-pages').textContent = (job.pages_crawled||0).toLocaleString();
+    document.getElementById('stat-links').textContent = (job.links_found||0).toLocaleString();
+    document.getElementById('stat-speed').textContent = '—';
+    document.getElementById('stat-eta').textContent   = '—';
+    document.getElementById('progress-bar').style.width = '100%';
+    document.getElementById('url').value = job.start_url || '';
+  });
+}
+
+async function deleteJob(jobId, btn) {
+  await fetch(`${API}/jobs/${jobId}`, { method: 'DELETE' });
+  btn.closest('.job-row').remove();
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function truncate(s, n) {
+  s = s || '';
+  return s.length > n ? s.slice(0, n) + '…' : s;
+}
+
+function formatTime(secs) {
+  if (secs < 60) return `${secs}s`;
+  if (secs < 3600) return `${Math.floor(secs/60)}m ${secs%60}s`;
+  return `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m`;
+}
+</script>
+</body>
+</html>
