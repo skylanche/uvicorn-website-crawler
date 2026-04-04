@@ -7,7 +7,9 @@ cd backend
 pip install -r requirements.txt	
 	
 # Step 2 — start server	
+
 Start server by Git Bash: uvicorn api:app --reload --port 8000
+
 Ctrl + C in terminal to stop the server
 	
 # Step 3 — open frontend	
