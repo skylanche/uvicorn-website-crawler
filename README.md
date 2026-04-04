@@ -4,6 +4,7 @@ Open you terminal
 Open Git Bash
 
 cd backend	
+
 pip install -r requirements.txt	
 	
 # Step 2 — start server	
